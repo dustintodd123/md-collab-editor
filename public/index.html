@@ -844,8 +844,8 @@
     }
 
     .editor-wrap {
-      flex-direction: column;
       position: relative;
+      overflow: hidden;
     }
 
     .divider, #divider {
@@ -862,13 +862,15 @@
 
     .pane {
       position: absolute;
-      inset: 0;
-      transition: opacity 0.15s ease, visibility 0.15s ease;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      transition: transform 0.2s ease;
     }
 
     .pane.mobile-hidden {
-      opacity: 0;
-      visibility: hidden;
+      transform: translateX(100%);
       pointer-events: none;
     }
 
@@ -902,6 +904,15 @@
 
     .pane-label {
       display: none;
+    }
+
+    /* Override desktop collapse — mobile tabs handle visibility */
+    .preview-collapsed #previewPane {
+      display: flex;
+    }
+
+    .preview-collapsed .collapse-toggle-bar {
+      display: none !important;
     }
 
     .version-panel {
