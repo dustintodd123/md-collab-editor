@@ -136,6 +136,14 @@ function scheduleSave(roomId, room) {
   }, 1000);
 }
 
+// Periodic autosave — flush all rooms every 30 seconds
+// Guards against unclean disconnects (phone sleep, network drops, killed tabs)
+setInterval(() => {
+  for (const [roomId, room] of rooms) {
+    saveRoom(roomId, room.content);
+  }
+}, 30 * 1000);
+
 // Flush any pending saves on shutdown
 function flushAll() {
   for (const [roomId, room] of rooms) {
@@ -149,6 +157,7 @@ function flushAll() {
 
 process.on("SIGINT", () => { flushAll(); process.exit(); });
 process.on("SIGTERM", () => { flushAll(); process.exit(); });
+process.on("SIGHUP", () => { flushAll(); process.exit(); });
 
 function broadcast(room, message, exclude) {
   const data = JSON.stringify(message);
@@ -186,6 +195,15 @@ app.post("/api/rooms/:roomId/revert/:timestamp", (req, res) => {
   res.json({ ok: true });
 });
 
+// Ping all clients every 30s to detect dead connections
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30 * 1000);
+
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const roomId = url.searchParams.get("room");
@@ -194,6 +212,9 @@ wss.on("connection", (ws, req) => {
     ws.close(1008, "Missing room ID");
     return;
   }
+
+  ws.isAlive = true;
+  ws.on("pong", () => { ws.isAlive = true; });
 
   const room = getRoom(roomId);
   room.clients.add(ws);
