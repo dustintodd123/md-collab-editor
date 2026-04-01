@@ -113,19 +113,25 @@ function getRoom(roomId) {
     rooms.set(roomId, {
       content: loadRoom(roomId),
       clients: new Set(),
-      saveTimer: null,
+      dirty: false,
       lastCheckpoint: 0
     });
   }
   return rooms.get(roomId);
 }
 
-// Debounced save — writes at most once per second per room
-function scheduleSave(roomId, room) {
-  if (room.saveTimer) return;
-  room.saveTimer = setTimeout(() => {
+// Track dirty state per room
+function markDirty(room) {
+  room.dirty = true;
+}
+
+// Periodic autosave — flush dirty rooms every 30 seconds
+setInterval(() => {
+  for (const [roomId, room] of rooms) {
+    if (!room.dirty) continue;
     saveRoom(roomId, room.content);
-    room.saveTimer = null;
+    room.dirty = false;
+    broadcast(room, { type: "saved" });
 
     // Checkpoint every 10 minutes of editing
     const now = Date.now();
@@ -133,24 +139,12 @@ function scheduleSave(roomId, room) {
       saveCheckpoint(roomId, room.content);
       room.lastCheckpoint = now;
     }
-  }, 1000);
-}
-
-// Periodic autosave — flush all rooms every 30 seconds
-// Guards against unclean disconnects (phone sleep, network drops, killed tabs)
-setInterval(() => {
-  for (const [roomId, room] of rooms) {
-    saveRoom(roomId, room.content);
   }
 }, 30 * 1000);
 
-// Flush any pending saves on shutdown
+// Flush all rooms on shutdown
 function flushAll() {
   for (const [roomId, room] of rooms) {
-    if (room.saveTimer) {
-      clearTimeout(room.saveTimer);
-      room.saveTimer = null;
-    }
     saveRoom(roomId, room.content);
   }
 }
@@ -169,6 +163,18 @@ function broadcast(room, message, exclude) {
 }
 
 app.use(express.json({ limit: "1mb" }));
+
+// ── Save API ──
+app.post("/api/rooms/:roomId/save", (req, res) => {
+  const { roomId } = req.params;
+  const room = rooms.get(roomId);
+  if (room) {
+    saveRoom(roomId, room.content);
+    room.dirty = false;
+    broadcast(room, { type: "saved" });
+  }
+  res.json({ ok: true });
+});
 
 // ── Version API ──
 app.get("/api/rooms/:roomId/versions", (req, res) => {
@@ -233,7 +239,7 @@ wss.on("connection", (ws, req) => {
 
     if (msg.type === "edit") {
       room.content = msg.content;
-      scheduleSave(roomId, room);
+      markDirty(room);
       broadcast(room, { type: "edit", content: msg.content }, ws);
     }
   });
@@ -244,7 +250,6 @@ wss.on("connection", (ws, req) => {
 
     // Flush to disk and clean up when last user leaves
     if (room.clients.size === 0) {
-      if (room.saveTimer) clearTimeout(room.saveTimer);
       saveRoom(roomId, room.content);
       rooms.delete(roomId);
     }

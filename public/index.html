@@ -94,6 +94,65 @@
     font-weight: 400;
   }
 
+  .save-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: default;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.3px;
+    transition: all 0.3s ease;
+  }
+
+  .save-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .save-text {
+    color: var(--text-muted);
+    transition: color 0.3s ease;
+  }
+
+  /* Unsaved state */
+  .save-indicator.unsaved {
+    cursor: pointer;
+    border-color: #E0955522;
+    background: #E0955508;
+  }
+
+  .save-indicator.unsaved:hover {
+    background: #E0955515;
+    border-color: #E0955544;
+  }
+
+  .save-indicator.unsaved .save-dot {
+    background: #E09555;
+    box-shadow: 0 0 6px #E0955544;
+  }
+
+  .save-indicator.unsaved .save-text {
+    color: #E09555;
+  }
+
+  /* Saving state */
+  .save-indicator.saving .save-dot {
+    background: var(--accent);
+    animation: pulse 0.8s ease-in-out infinite;
+  }
+
+  .save-indicator.saving .save-text {
+    color: var(--accent);
+  }
+
   .room-id {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
@@ -862,6 +921,10 @@
 <div class="topbar">
   <div class="topbar-left">
     <div class="logo">md<span>editor</span></div>
+    <button class="save-indicator" id="saveIndicator" title="All changes saved">
+      <div class="save-dot"></div>
+      <span class="save-text">Saved</span>
+    </button>
     <div class="room-id" id="roomDisplay"></div>
   </div>
   <div class="topbar-right">
@@ -1017,6 +1080,33 @@
   const emptyState = document.getElementById('emptyState');
   const presenceCount = document.getElementById('presenceCount');
   const banner = document.getElementById('connectionBanner');
+  const saveIndicator = document.getElementById('saveIndicator');
+  const saveDot = saveIndicator.querySelector('.save-dot');
+  const saveText = saveIndicator.querySelector('.save-text');
+
+  function setSaveState(state) {
+    saveIndicator.classList.remove('unsaved', 'saving');
+    if (state === 'unsaved') {
+      saveIndicator.classList.add('unsaved');
+      saveIndicator.title = 'Unsaved changes — click to save now';
+      saveText.textContent = 'Unsaved';
+    } else if (state === 'saving') {
+      saveIndicator.classList.add('saving');
+      saveIndicator.title = 'Saving...';
+      saveText.textContent = 'Saving...';
+    } else {
+      saveIndicator.title = 'All changes saved';
+      saveText.textContent = 'Saved';
+    }
+  }
+
+  saveIndicator.addEventListener('click', function() {
+    if (!saveIndicator.classList.contains('unsaved')) return;
+    setSaveState('saving');
+    fetch('/api/rooms/' + encodeURIComponent(roomId) + '/save', { method: 'POST' })
+      .then(function() { setSaveState('saved'); })
+      .catch(function() { setSaveState('unsaved'); });
+  });
 
   // ── Render ──
   function renderPreview(text) {
@@ -1033,6 +1123,7 @@
   // ── Editor Input ──
   let sendTimeout;
   editor.addEventListener('input', function() {
+    setSaveState('unsaved');
     renderPreview(editor.value);
     clearTimeout(sendTimeout);
     sendTimeout = setTimeout(function() {
@@ -1247,6 +1338,8 @@
         renderPreview(msg.content);
       } else if (msg.type === 'presence') {
         presenceCount.textContent = msg.count + ' online';
+      } else if (msg.type === 'saved') {
+        setSaveState('saved');
       }
     });
 
