@@ -1,0 +1,9 @@
+services:
+  - type: web
+    runtime: node
+    name: mdeditor
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production

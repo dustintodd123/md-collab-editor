@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mdeditor — collaborative markdown</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Literata:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg-deep: #0C0C0E;
+    --bg-editor: #111114;
+    --bg-preview: #16161A;
+    --bg-bar: #111114;
+    --accent: #D4A039;
+    --accent-dim: #D4A03926;
+    --accent-glow: #D4A03944;
+    --text-primary: #C8C5BD;
+    --text-secondary: #75736B;
+    --text-muted: #4A483F;
+    --border: #232328;
+    --green: #5CB85C;
+    --green-glow: #5CB85C55;
+    --scrollbar-thumb: #2A2A30;
+    --scrollbar-track: transparent;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    font-family: 'DM Sans', sans-serif;
+    overflow: hidden;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    opacity: 0;
+    animation: fadeIn 0.6s ease-out 0.1s forwards;
+  }
+
+  @keyframes fadeIn {
+    to { opacity: 1; }
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--green-glow); }
+    50% { opacity: 0.6; box-shadow: 0 0 8px var(--green-glow); }
+  }
+
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Top Bar ── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    height: 48px;
+    min-height: 48px;
+    background: var(--bg-bar);
+    border-bottom: 1px solid var(--border);
+    animation: slideDown 0.4s ease-out 0.2s both;
+    z-index: 10;
+  }
+
+  .topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .logo {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+    user-select: none;
+  }
+
+  .logo span {
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+
+  .room-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--accent-dim);
+    border: 1px solid var(--accent-glow);
+    padding: 3px 10px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+  }
+
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .presence {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: 3px 10px;
+    border-radius: 4px;
+    background: #5CB85C0A;
+  }
+
+  .presence-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2.5s ease-in-out infinite;
+  }
+
+  .btn {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 5px 14px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .btn:hover {
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+    background: #ffffff06;
+  }
+
+  .btn-accent {
+    border-color: var(--accent-glow);
+    color: var(--accent);
+  }
+
+  .btn-accent:hover {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .btn .copied-text { display: none; }
+  .btn.copied .default-text { display: none; }
+  .btn.copied .copied-text { display: inline; }
+
+  /* ── Editor Layout ── */
+  .editor-wrap {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+
+  .pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+  }
+
+  .pane-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 10px 20px 6px;
+    user-select: none;
+  }
+
+  .divider {
+    width: 1px;
+    background: var(--border);
+    position: relative;
+  }
+
+  .divider::after {
+    content: '';
+    position: absolute;
+    top: 30%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 1px;
+    height: 40%;
+    background: linear-gradient(to bottom, transparent, var(--accent-glow), transparent);
+  }
+
+  /* ── Textarea ── */
+  .editor-pane {
+    background: var(--bg-editor);
+  }
+
+  #editor {
+    flex: 1;
+    width: 100%;
+    padding: 12px 20px 20px;
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    line-height: 1.7;
+    tab-size: 2;
+    caret-color: var(--accent);
+    overflow-y: auto;
+  }
+
+  #editor::placeholder {
+    color: var(--text-muted);
+  }
+
+  /* ── Preview ── */
+  .preview-pane {
+    background: var(--bg-preview);
+  }
+
+  #preview {
+    flex: 1;
+    padding: 12px 28px 28px;
+    overflow-y: auto;
+    font-family: 'Literata', Georgia, serif;
+    font-size: 15px;
+    line-height: 1.75;
+    color: #BAB8B0;
+  }
+
+  /* ── Markdown Styles ── */
+  #preview h1, #preview h2, #preview h3,
+  #preview h4, #preview h5, #preview h6 {
+    font-family: 'DM Sans', sans-serif;
+    color: #E0DED6;
+    margin-top: 1.6em;
+    margin-bottom: 0.5em;
+    line-height: 1.3;
+  }
+
+  #preview h1 {
+    font-size: 1.9em;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4em;
+  }
+
+  #preview h2 {
+    font-size: 1.45em;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+
+  #preview h3 {
+    font-size: 1.15em;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  #preview h1:first-child,
+  #preview h2:first-child,
+  #preview h3:first-child {
+    margin-top: 0;
+  }
+
+  #preview p {
+    margin-bottom: 1em;
+  }
+
+  #preview a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: var(--accent-glow);
+    transition: text-decoration-color 0.2s;
+  }
+
+  #preview a:hover {
+    text-decoration-color: var(--accent);
+  }
+
+  #preview strong {
+    color: #D0CEC6;
+    font-weight: 700;
+  }
+
+  #preview em {
+    font-style: italic;
+    color: #C0BDB4;
+  }
+
+  #preview code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    background: #0C0C0E;
+    color: var(--accent);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  #preview pre {
+    background: #0C0C0E;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 18px;
+    margin: 1.2em 0;
+    overflow-x: auto;
+  }
+
+  #preview pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  #preview blockquote {
+    border-left: 3px solid var(--accent);
+    padding: 4px 0 4px 18px;
+    margin: 1.2em 0;
+    color: var(--text-secondary);
+    font-style: italic;
+    background: var(--accent-dim);
+    border-radius: 0 4px 4px 0;
+  }
+
+  #preview blockquote p:last-child {
+    margin-bottom: 0;
+  }
+
+  #preview ul, #preview ol {
+    padding-left: 1.6em;
+    margin-bottom: 1em;
+  }
+
+  #preview li {
+    margin-bottom: 0.35em;
+  }
+
+  #preview li::marker {
+    color: var(--text-muted);
+  }
+
+  #preview hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2em 0;
+  }
+
+  #preview img {
+    max-width: 100%;
+    border-radius: 6px;
+    margin: 1em 0;
+  }
+
+  #preview table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2em 0;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.9em;
+  }
+
+  #preview th {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 2px solid var(--border);
+    color: #D0CEC6;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+
+  #preview td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  #preview tr:last-child td {
+    border-bottom: none;
+  }
+
+  #preview .task-list-item {
+    list-style: none;
+    margin-left: -1.6em;
+  }
+
+  #preview input[type="checkbox"] {
+    accent-color: var(--accent);
+    margin-right: 6px;
+  }
+
+  /* ── Scrollbars ── */
+  #editor::-webkit-scrollbar,
+  #preview::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  #editor::-webkit-scrollbar-track,
+  #preview::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+
+  #editor::-webkit-scrollbar-thumb,
+  #preview::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 3px;
+  }
+
+  #editor::-webkit-scrollbar-thumb:hover,
+  #preview::-webkit-scrollbar-thumb:hover {
+    background: #3A3A42;
+  }
+
+  /* ── Empty State ── */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 40px;
+    user-select: none;
+  }
+
+  .empty-state .icon {
+    font-size: 36px;
+    margin-bottom: 12px;
+    opacity: 0.4;
+  }
+
+  .empty-state p {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  /* ── Connection Banner ── */
+  .connection-banner {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px;
+    background: #D4A03915;
+    border-bottom: 1px solid var(--accent-glow);
+    font-size: 12px;
+    color: var(--accent);
+    animation: slideDown 0.3s ease-out;
+  }
+
+  .connection-banner.visible {
+    display: flex;
+  }
+
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--accent-glow);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .toolbar-spacer {
+    flex: 1;
+  }
+
+  .tb-copy.copied {
+    color: var(--green);
+  }
+
+  /* ── Collapse Toggle ── */
+  .collapse-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+
+  .collapse-btn:hover {
+    color: var(--text-primary);
+    background: #ffffff0a;
+  }
+
+  .collapse-btn svg {
+    transition: transform 0.25s ease;
+  }
+
+  .preview-collapsed #previewPane {
+    display: none;
+  }
+
+  .preview-collapsed #divider {
+    display: none;
+  }
+
+  .preview-collapsed .collapse-toggle-bar {
+    display: flex;
+  }
+
+  .collapse-toggle-bar {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    background: var(--bg-preview);
+    border-left: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .collapse-toggle-bar:hover {
+    background: #1c1c21;
+  }
+
+  .collapse-toggle-bar svg {
+    color: var(--text-muted);
+    transition: color 0.15s;
+  }
+
+  .collapse-toggle-bar:hover svg {
+    color: var(--text-primary);
+  }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 12px;
+    border-bottom: 1px solid var(--border);
+    background: #0E0E11;
+    flex-wrap: wrap;
+    min-height: 36px;
+  }
+
+  .toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+  }
+
+  .toolbar-sep {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+    margin: 0 6px;
+  }
+
+  .tb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 26px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .tb:hover {
+    color: var(--text-primary);
+    background: #ffffff0a;
+  }
+
+  .tb:active {
+    background: var(--accent-dim);
+    color: var(--accent);
+  }
+
+  .tb svg {
+    flex-shrink: 0;
+  }
+
+  .tb .tb-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+  }
+
+  /* ── Version Panel ── */
+  .version-wrap {
+    position: relative;
+  }
+
+  .version-panel {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 280px;
+    max-height: 340px;
+    background: var(--bg-editor);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    z-index: 100;
+    overflow: hidden;
+    animation: slideDown 0.2s ease-out;
+  }
+
+  .version-panel.open {
+    display: block;
+  }
+
+  .version-header {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 12px 14px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .version-list {
+    overflow-y: auto;
+    max-height: 290px;
+    padding: 4px 0;
+  }
+
+  .version-list::-webkit-scrollbar { width: 4px; }
+  .version-list::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+
+  .version-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    cursor: default;
+    transition: background 0.15s;
+  }
+
+  .version-item:hover {
+    background: #ffffff06;
+  }
+
+  .version-time {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  .version-ago {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
+
+  .version-revert {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--accent-glow);
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .version-revert:hover {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+  }
+
+  .version-empty {
+    padding: 24px 14px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 700px) {
+    .editor-wrap {
+      flex-direction: column;
+    }
+
+    .divider {
+      width: auto;
+      height: 1px;
+    }
+
+    .divider::after {
+      top: 50%;
+      left: 20%;
+      transform: translateY(-50%);
+      width: 60%;
+      height: 1px;
+      background: linear-gradient(to right, transparent, var(--accent-glow), transparent);
+    }
+
+    .pane {
+      flex: 1;
+    }
+
+    .room-id { display: none; }
+
+    .topbar { padding: 0 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="connection-banner" id="connectionBanner">
+  <div class="spinner"></div>
+  <span>Reconnecting...</span>
+</div>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="logo">md<span>editor</span></div>
+    <div class="room-id" id="roomDisplay"></div>
+  </div>
+  <div class="topbar-right">
+    <div class="presence" id="presence">
+      <div class="presence-dot"></div>
+      <span id="presenceCount">1 online</span>
+    </div>
+    <button class="btn btn-accent" id="copyBtn" onclick="copyLink()">
+      <span class="default-text">Copy Link</span>
+      <span class="copied-text">Copied!</span>
+    </button>
+    <div class="version-wrap">
+      <button class="btn" id="historyBtn" onclick="toggleHistory()">History</button>
+      <div class="version-panel" id="versionPanel">
+        <div class="version-header">Version History</div>
+        <div class="version-list" id="versionList">
+          <div class="version-empty">No checkpoints yet</div>
+        </div>
+      </div>
+    </div>
+    <input type="file" id="fileInput" accept=".md,.markdown,.txt" hidden>
+    <button class="btn" onclick="document.getElementById('fileInput').click()">Import</button>
+    <button class="btn" onclick="newRoom()">New Room</button>
+  </div>
+</div>
+
+<div class="editor-wrap">
+  <div class="pane editor-pane">
+    <div class="pane-label">Markdown</div>
+    <div class="toolbar" id="toolbar">
+      <div class="toolbar-group">
+        <button class="tb" data-action="h1" title="Heading 1"><span class="tb-text">H1</span></button>
+        <button class="tb" data-action="h2" title="Heading 2"><span class="tb-text">H2</span></button>
+        <button class="tb" data-action="h3" title="Heading 3"><span class="tb-text">H3</span></button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="tb" data-action="bold" title="Bold (Ctrl+B)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>
+        <button class="tb" data-action="italic" title="Italic (Ctrl+I)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+        <button class="tb" data-action="strikethrough" title="Strikethrough"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4H9a3 3 0 0 0-3 3c0 2 1 3 3 3"/><path d="M12 15c2 0 4 1 4 3a3 3 0 0 1-3 3H8"/><line x1="4" y1="12" x2="20" y2="12"/></svg></button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="tb" data-action="code" title="Inline Code (Ctrl+`)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
+        <button class="tb" data-action="codeblock" title="Code Block"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9 8 5 12 9 16"/><polyline points="15 8 19 12 15 16"/></svg></button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="tb" data-action="link" title="Link (Ctrl+K)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+        <button class="tb" data-action="image" title="Image"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="tb" data-action="ul" title="Bullet List"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg></button>
+        <button class="tb" data-action="ol" title="Numbered List"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="20" y2="6"/><line x1="10" y1="12" x2="20" y2="12"/><line x1="10" y1="18" x2="20" y2="18"/><text x="2" y="8" font-size="8" fill="currentColor" stroke="none" font-family="sans-serif">1</text><text x="2" y="14" font-size="8" fill="currentColor" stroke="none" font-family="sans-serif">2</text><text x="2" y="20" font-size="8" fill="currentColor" stroke="none" font-family="sans-serif">3</text></svg></button>
+        <button class="tb" data-action="tasklist" title="Task List"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="6" height="6" rx="1"/><polyline points="5 8 6.5 9.5 9 6.5"/><line x1="13" y1="8" x2="21" y2="8"/><rect x="3" y="13" width="6" height="6" rx="1"/><line x1="13" y1="16" x2="21" y2="16"/></svg></button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div class="toolbar-group">
+        <button class="tb" data-action="blockquote" title="Blockquote"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3z"/></svg></button>
+        <button class="tb" data-action="hr" title="Horizontal Rule"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="12" x2="21" y2="12"/></svg></button>
+        <button class="tb" data-action="table" title="Table"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg></button>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <button class="tb tb-copy" id="copyEditorBtn" title="Copy all to clipboard"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    </div>
+    <textarea id="editor" placeholder="Start writing markdown..." spellcheck="false"></textarea>
+  </div>
+  <div class="collapse-toggle-bar" id="expandBar" title="Show preview">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+  </div>
+  <div class="divider" id="divider"></div>
+  <div class="pane preview-pane" id="previewPane">
+    <div class="pane-label">
+      Preview
+      <button class="collapse-btn" id="collapseBtn" title="Toggle preview">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+    <div id="preview">
+      <div class="empty-state" id="emptyState">
+        <div class="icon">&#9998;</div>
+        <p>Start typing on the left<br>and the preview appears here.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  // ── Room Setup ──
+  const params = new URLSearchParams(window.location.search);
+  let roomId = params.get('room');
+
+  if (!roomId) {
+    roomId = crypto.randomUUID();
+    window.location.replace('?room=' + roomId);
+    return;
+  }
+
+  document.getElementById('roomDisplay').textContent = roomId;
+  document.title = 'mdeditor — ' + roomId;
+
+  // ── Marked Config ──
+  marked.setOptions({
+    highlight: function(code, lang) {
+      if (lang && hljs.getLanguage(lang)) {
+        return hljs.highlight(code, { language: lang }).value;
+      }
+      return hljs.highlightAuto(code).value;
+    },
+    breaks: true,
+    gfm: true
+  });
+
+  // ── Preview Collapse ──
+  const editorWrap = document.querySelector('.editor-wrap');
+  const collapseBtn = document.getElementById('collapseBtn');
+  const expandBar = document.getElementById('expandBar');
+
+  function setPreviewCollapsed(collapsed) {
+    if (collapsed) {
+      editorWrap.classList.add('preview-collapsed');
+    } else {
+      editorWrap.classList.remove('preview-collapsed');
+    }
+    try { localStorage.setItem('mdeditor-preview-collapsed', collapsed ? '1' : '0'); } catch {}
+  }
+
+  // Restore saved state
+  try {
+    if (localStorage.getItem('mdeditor-preview-collapsed') === '1') {
+      editorWrap.classList.add('preview-collapsed');
+    }
+  } catch {}
+
+  collapseBtn.addEventListener('click', function() {
+    setPreviewCollapsed(true);
+  });
+
+  expandBar.addEventListener('click', function() {
+    setPreviewCollapsed(false);
+  });
+
+  // ── Elements ──
+  const editor = document.getElementById('editor');
+  const preview = document.getElementById('preview');
+  const emptyState = document.getElementById('emptyState');
+  const presenceCount = document.getElementById('presenceCount');
+  const banner = document.getElementById('connectionBanner');
+
+  // ── Render ──
+  function renderPreview(text) {
+    if (!text.trim()) {
+      preview.innerHTML = '';
+      preview.appendChild(emptyState);
+      emptyState.style.display = 'flex';
+      return;
+    }
+    emptyState.style.display = 'none';
+    preview.innerHTML = marked.parse(text);
+  }
+
+  // ── Editor Input ──
+  let sendTimeout;
+  editor.addEventListener('input', function() {
+    renderPreview(editor.value);
+    clearTimeout(sendTimeout);
+    sendTimeout = setTimeout(function() {
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'edit', content: editor.value }));
+      }
+    }, 30);
+  });
+
+  // Handle tab key for indentation
+  editor.addEventListener('keydown', function(e) {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = this.selectionStart;
+      const end = this.selectionEnd;
+      this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+      this.selectionStart = this.selectionEnd = start + 2;
+      editor.dispatchEvent(new Event('input'));
+    }
+  });
+
+  // ── Copy Editor Contents ──
+  document.getElementById('copyEditorBtn').addEventListener('click', function() {
+    var btn = this;
+    navigator.clipboard.writeText(editor.value).then(function() {
+      btn.classList.add('copied');
+      setTimeout(function() { btn.classList.remove('copied'); }, 1200);
+    });
+  });
+
+  // ── Formatting Toolbar ──
+  function getSelection() {
+    return {
+      start: editor.selectionStart,
+      end: editor.selectionEnd,
+      text: editor.value.substring(editor.selectionStart, editor.selectionEnd)
+    };
+  }
+
+  // Get the full line(s) that the selection spans
+  function getLines() {
+    var val = editor.value;
+    var lineStart = val.lastIndexOf('\n', editor.selectionStart - 1) + 1;
+    var lineEnd = val.indexOf('\n', editor.selectionEnd);
+    if (lineEnd === -1) lineEnd = val.length;
+    return { lineStart: lineStart, lineEnd: lineEnd, text: val.substring(lineStart, lineEnd) };
+  }
+
+  function replaceAndSelect(newText, selStart, selEnd) {
+    editor.focus();
+    editor.value = editor.value.substring(0, selStart) + newText + editor.value.substring(selEnd);
+    editor.dispatchEvent(new Event('input'));
+  }
+
+  // Wrap selected text with before/after markers (bold, italic, code, strikethrough)
+  function wrapSelection(before, after) {
+    var sel = getSelection();
+    var text = sel.text || 'text';
+    var wasEmpty = !sel.text;
+    replaceAndSelect(before + text + after, sel.start, sel.end);
+    // Select the inner text for easy replacement
+    editor.selectionStart = sel.start + before.length;
+    editor.selectionEnd = sel.start + before.length + text.length;
+  }
+
+  // Prefix each selected line (headings, lists, blockquote)
+  function prefixLines(prefix) {
+    var lines = getLines();
+    var selectedLines = lines.text.split('\n');
+    var result = selectedLines.map(function(line) {
+      return prefix + line;
+    }).join('\n');
+    replaceAndSelect(result, lines.lineStart, lines.lineEnd);
+    editor.selectionStart = lines.lineStart;
+    editor.selectionEnd = lines.lineStart + result.length;
+  }
+
+  // Insert text at cursor
+  function insertAt(text) {
+    var pos = editor.selectionStart;
+    // Ensure we're on a new line
+    var val = editor.value;
+    var needsNewline = pos > 0 && val[pos - 1] !== '\n';
+    var prefix = needsNewline ? '\n' : '';
+    replaceAndSelect(prefix + text, pos, editor.selectionEnd);
+    editor.selectionStart = editor.selectionEnd = pos + prefix.length + text.length;
+  }
+
+  var actions = {
+    h1: function() { var l = getLines(); replaceAndSelect('# ' + l.text.replace(/^#{1,6}\s*/, ''), l.lineStart, l.lineEnd); },
+    h2: function() { var l = getLines(); replaceAndSelect('## ' + l.text.replace(/^#{1,6}\s*/, ''), l.lineStart, l.lineEnd); },
+    h3: function() { var l = getLines(); replaceAndSelect('### ' + l.text.replace(/^#{1,6}\s*/, ''), l.lineStart, l.lineEnd); },
+    bold: function() { wrapSelection('**', '**'); },
+    italic: function() { wrapSelection('_', '_'); },
+    strikethrough: function() { wrapSelection('~~', '~~'); },
+    code: function() { wrapSelection('`', '`'); },
+    codeblock: function() {
+      var sel = getSelection();
+      var text = sel.text || 'code';
+      var before = sel.start > 0 && editor.value[sel.start - 1] !== '\n' ? '\n' : '';
+      replaceAndSelect(before + '```\n' + text + '\n```\n', sel.start, sel.end);
+      editor.selectionStart = sel.start + before.length + 4;
+      editor.selectionEnd = sel.start + before.length + 4 + text.length;
+    },
+    link: function() {
+      var sel = getSelection();
+      var text = sel.text || 'link text';
+      replaceAndSelect('[' + text + '](url)', sel.start, sel.end);
+      // Select "url" for quick replacement
+      var urlStart = sel.start + 1 + text.length + 2;
+      editor.selectionStart = urlStart;
+      editor.selectionEnd = urlStart + 3;
+    },
+    image: function() {
+      var sel = getSelection();
+      var alt = sel.text || 'alt text';
+      replaceAndSelect('![' + alt + '](url)', sel.start, sel.end);
+      var urlStart = sel.start + 2 + alt.length + 2;
+      editor.selectionStart = urlStart;
+      editor.selectionEnd = urlStart + 3;
+    },
+    ul: function() { prefixLines('- '); },
+    ol: function() {
+      var lines = getLines();
+      var selectedLines = lines.text.split('\n');
+      var result = selectedLines.map(function(line, i) {
+        return (i + 1) + '. ' + line;
+      }).join('\n');
+      replaceAndSelect(result, lines.lineStart, lines.lineEnd);
+    },
+    tasklist: function() { prefixLines('- [ ] '); },
+    blockquote: function() { prefixLines('> '); },
+    hr: function() { insertAt('\n---\n'); },
+    table: function() {
+      insertAt('| Column 1 | Column 2 | Column 3 |\n| -------- | -------- | -------- |\n| Cell     | Cell     | Cell     |\n');
+    }
+  };
+
+  // Toolbar click handler
+  document.getElementById('toolbar').addEventListener('click', function(e) {
+    var btn = e.target.closest('.tb');
+    if (!btn) return;
+    var action = btn.dataset.action;
+    if (actions[action]) actions[action]();
+  });
+
+  // Keyboard shortcuts
+  editor.addEventListener('keydown', function(e) {
+    var mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    var key = e.key.toLowerCase();
+    if (key === 'b') { e.preventDefault(); actions.bold(); }
+    else if (key === 'i') { e.preventDefault(); actions.italic(); }
+    else if (key === 'k') { e.preventDefault(); actions.link(); }
+    else if (key === '`') { e.preventDefault(); actions.code(); }
+  });
+
+  // ── WebSocket ──
+  let ws;
+  let reconnectDelay = 500;
+
+  function connect() {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(protocol + '//' + location.host + '?room=' + roomId);
+
+    ws.addEventListener('open', function() {
+      banner.classList.remove('visible');
+      reconnectDelay = 500;
+    });
+
+    ws.addEventListener('message', function(e) {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+
+      if (msg.type === 'init') {
+        editor.value = msg.content;
+        renderPreview(msg.content);
+      } else if (msg.type === 'edit') {
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        editor.value = msg.content;
+        editor.selectionStart = start;
+        editor.selectionEnd = end;
+        renderPreview(msg.content);
+      } else if (msg.type === 'presence') {
+        presenceCount.textContent = msg.count + ' online';
+      }
+    });
+
+    ws.addEventListener('close', function() {
+      banner.classList.add('visible');
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 1.5, 8000);
+    });
+
+    ws.addEventListener('error', function() {
+      ws.close();
+    });
+  }
+
+  connect();
+
+  // ── Actions ──
+  window.copyLink = function() {
+    navigator.clipboard.writeText(window.location.href).then(function() {
+      const btn = document.getElementById('copyBtn');
+      btn.classList.add('copied');
+      setTimeout(function() { btn.classList.remove('copied'); }, 1500);
+    });
+  };
+
+  document.getElementById('fileInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      editor.value = ev.target.result;
+      renderPreview(editor.value);
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'edit', content: editor.value }));
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+
+  // ── Version History ──
+  const versionPanel = document.getElementById('versionPanel');
+  const versionList = document.getElementById('versionList');
+
+  window.toggleHistory = function() {
+    const isOpen = versionPanel.classList.toggle('open');
+    if (isOpen) loadVersions();
+  };
+
+  // Close panel when clicking outside
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('.version-wrap')) {
+      versionPanel.classList.remove('open');
+    }
+  });
+
+  function timeAgo(ts) {
+    const diff = Date.now() - ts;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + 'm ago';
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + 'h ' + (mins % 60) + 'm ago';
+    return Math.floor(hrs / 24) + 'd ago';
+  }
+
+  function formatTime(ts) {
+    const d = new Date(ts);
+    return d.toLocaleString(undefined, {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  }
+
+  function loadVersions() {
+    fetch('/api/rooms/' + encodeURIComponent(roomId) + '/versions')
+      .then(function(r) { return r.json(); })
+      .then(function(versions) {
+        if (!versions.length) {
+          versionList.innerHTML = '<div class="version-empty">No checkpoints yet.<br>Checkpoints are saved every 10 min.</div>';
+          return;
+        }
+        versionList.innerHTML = versions.map(function(v) {
+          return '<div class="version-item">' +
+            '<div><div class="version-time">' + formatTime(v.timestamp) + '</div>' +
+            '<div class="version-ago">' + timeAgo(v.timestamp) + '</div></div>' +
+            '<button class="version-revert" onclick="revertTo(' + v.timestamp + ')">Restore</button>' +
+            '</div>';
+        }).join('');
+      });
+  }
+
+  window.revertTo = function(timestamp) {
+    fetch('/api/rooms/' + encodeURIComponent(roomId) + '/revert/' + timestamp, { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) {
+          versionPanel.classList.remove('open');
+        }
+      });
+  };
+
+  window.newRoom = function() {
+    const id = crypto.randomUUID();
+    window.location.href = '?room=' + id;
+  };
+
+})();
+</script>
+</body>
+</html>

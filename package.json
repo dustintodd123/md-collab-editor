@@ -1,0 +1,14 @@
+{
+  "name": "mdeditor",
+  "version": "1.0.0",
+  "description": "Real-time collaborative markdown editor",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "marked": "^15.0.7",
+    "ws": "^8.18.0"
+  }
+}
